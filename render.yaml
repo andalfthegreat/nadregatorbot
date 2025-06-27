@@ -1,5 +1,5 @@
 services:
-  - type: worker              # <== THIS IS THE FIX
+  - type: worker              # ← THIS MUST BE `worker`
     name: telegram-bot
     env: docker
     plan: free
@@ -13,4 +13,3 @@ services:
 
 databases:
   - name: telegram-db
-
