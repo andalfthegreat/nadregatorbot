@@ -9,7 +9,7 @@ TELEGRAM_BOT_TOKEN = os.environ.get("7970077331:AAEE-_YknFwcxhl3rdGgRbcOxR3iTXW7
 USER_PREFS_FILE = 'user_prefs.json'
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
-# ✅ Only these projects can be subscribed to
+# ✅ Only these projects are allowed
 ALLOWED_PROJECTS = ["monad", "molandak", "chog"]
 
 def load_prefs():
@@ -52,51 +52,119 @@ def handle_webhook(project):
 @app.route(f"/{TELEGRAM_BOT_TOKEN}", methods=["POST"])
 def telegram_webhook():
     data = request.json
-    if "message" not in data:
+
+    # ✅ Handle text messages
+    if "message" in data:
+        message = data["message"]
+        user_id = str(message["chat"]["id"])
+        text = message.get("text", "").strip()
+        prefs = load_prefs()
+
+        if text.startswith("/subscribe"):
+            parts = text.split(maxsplit=1)
+            if len(parts) == 2:
+                project = parts[1].lower()
+                if project not in ALLOWED_PROJECTS:
+                    send_reply(user_id, f"❌ '{project}' is not a valid project.")
+                else:
+                    prefs.setdefault(user_id, [])
+                    if project not in prefs[user_id]:
+                        prefs[user_id].append(project)
+                        save_prefs(prefs)
+                        send_reply(user_id, f"✅ Subscribed to '{project}'")
+                    else:
+                        send_reply(user_id, f"⚠️ Already subscribed to '{project}'")
+            else:
+                send_reply(user_id, "❗ Usage: /subscribe <project>")
+
+        elif text.startswith("/unsubscribe"):
+            parts = text.split(maxsplit=1)
+            if len(parts) == 2:
+                project = parts[1].lower()
+                if project not in ALLOWED_PROJECTS:
+                    send_reply(user_id, f"❌ '{project}' is not a valid project.")
+                elif user_id in prefs and project in prefs[user_id]:
+                    prefs[user_id].remove(project)
+                    save_prefs(prefs)
+                    send_reply(user_id, f"❌ Unsubscribed from '{project}'")
+                else:
+                    send_reply(user_id, f"⚠️ Not subscribed to '{project}'")
+            else:
+                send_reply(user_id, "❗ Usage: /unsubscribe <project>")
+
+        elif text == "/projects":
+            buttons = []
+            for project in ALLOWED_PROJECTS:
+                buttons.append([
+                    {
+                        "text": f"Subscribe {project.title()}",
+                        "callback_data": f"subscribe:{project}"
+                    },
+                    {
+                        "text": f"Unsubscribe {project.title()}",
+                        "callback_data": f"unsubscribe:{project}"
+                    }
+                ])
+            send_buttons(user_id, "📋 Choose a project to subscribe/unsubscribe:", buttons)
+
+        else:
+            send_reply(
+                user_id,
+                "🤖 Available commands:\n"
+                "/projects – Show all projects\n"
+                "/subscribe <project>\n"
+                "/unsubscribe <project>"
+            )
         return {"ok": True}
 
-    message = data["message"]
-    user_id = str(message["chat"]["id"])
-    text = message.get("text", "").strip()
-    prefs = load_prefs()
+    # ✅ Handle inline button callbacks
+    elif "callback_query" in data:
+        query = data["callback_query"]
+        user_id = str(query["from"]["id"])
+        callback_data = query["data"]
+        prefs = load_prefs()
 
-    if text.startswith("/subscribe"):
-        parts = text.split(maxsplit=1)
-        if len(parts) == 2:
-            project = parts[1].lower()
+        if ":" in callback_data:
+            action, project = callback_data.split(":")
             if project not in ALLOWED_PROJECTS:
                 send_reply(user_id, f"❌ '{project}' is not a valid project.")
             else:
-                prefs.setdefault(user_id, [])
-                if project not in prefs[user_id]:
-                    prefs[user_id].append(project)
-                    save_prefs(prefs)
-                    send_reply(user_id, f"✅ Subscribed to '{project}'")
-                else:
-                    send_reply(user_id, f"⚠️ Already subscribed to '{project}'")
-        else:
-            send_reply(user_id, "❗ Usage: /subscribe <project>")
+                if action == "subscribe":
+                    prefs.setdefault(user_id, [])
+                    if project not in prefs[user_id]:
+                        prefs[user_id].append(project)
+                        save_prefs(prefs)
+                        send_reply(user_id, f"✅ Subscribed to '{project}'")
+                    else:
+                        send_reply(user_id, f"⚠️ Already subscribed to '{project}'")
+                elif action == "unsubscribe":
+                    if user_id in prefs and project in prefs[user_id]:
+                        prefs[user_id].remove(project)
+                        save_prefs(prefs)
+                        send_reply(user_id, f"❌ Unsubscribed from '{project}'")
+                    else:
+                        send_reply(user_id, f"⚠️ Not subscribed to '{project}'")
 
-    elif text.startswith("/unsubscribe"):
-        parts = text.split(maxsplit=1)
-        if len(parts) == 2:
-            project = parts[1].lower()
-            if project not in ALLOWED_PROJECTS:
-                send_reply(user_id, f"❌ '{project}' is not a valid project.")
-            elif user_id in prefs and project in prefs[user_id]:
-                prefs[user_id].remove(project)
-                save_prefs(prefs)
-                send_reply(user_id, f"❌ Unsubscribed from '{project}'")
-            else:
-                send_reply(user_id, f"⚠️ Not subscribed to '{project}'")
-        else:
-            send_reply(user_id, "❗ Usage: /unsubscribe <project>")
+        # Acknowledge callback so Telegram stops loading spinner
+        callback_id = query["id"]
+        requests.post(f"{TELEGRAM_API}/answerCallbackQuery", json={"callback_query_id": callback_id})
 
-    else:
-        send_reply(user_id, "🤖 Use /subscribe <project> or /unsubscribe <project>")
+        return {"ok": True}
 
     return {"ok": True}
 
 def send_reply(chat_id, text):
     url = f"{TELEGRAM_API}/sendMessage"
     requests.post(url, json={"chat_id": chat_id, "text": text})
+
+def send_buttons(chat_id, text, buttons):
+    url = f"{TELEGRAM_API}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "reply_markup": {
+            "inline_keyboard": buttons
+        }
+    }
+    requests.post(url, json=payload)
+
