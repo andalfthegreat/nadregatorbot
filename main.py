@@ -1,5 +1,5 @@
 import os
-import threading
+import asyncio
 from flask import Flask, request
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -58,9 +58,13 @@ async def broadcast_announcement(message: str):
         except Exception as e:
             print(f"❌ Failed to send to {chat_id}: {e}")
 
-# --- Start the bot polling in a separate thread ---
-def run_bot():
-    telegram_app.run_polling()
+# --- Run the bot in the main async loop ---
+async def main():
+    await telegram_app.initialize()
+    await telegram_app.start()
+    await telegram_app.updater.start_polling()
+    await telegram_app.updater.idle()
 
-threading.Thread(target=run_bot).start()
+if __name__ == "__main__":
+    asyncio.run(main())
 
