@@ -2,14 +2,10 @@ import os
 import json
 from flask import Flask, request
 import requests
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
 app = Flask(__name__)
 
-TELEGRAM_BOT_TOKEN = "7970077331:AAEE-_YknFwcxhl3rdGgRbcOxR3iTXW7RDE"
+TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 ALLOWED_PROJECTS = ["monad", "molandak", "chog"]
