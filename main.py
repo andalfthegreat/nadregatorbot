@@ -19,7 +19,7 @@ def send_to_telegram(project, message_text):
     prefs = load_prefs()
     for user_id, projects in prefs.items():
         if project in projects:
-            url = f"https://api.telegram.org/bot{8052269157:AAHAwaObskBrT8I0c6sDt8aVCk9dpkitOxk}/sendMessage"
+            url = f"https://api.telegram.org/bot{7970077331:AAEE-_YknFwcxhl3rdGgRbcOxR3iTXW7RDE}/sendMessage"
             payload = {
                 "chat_id": user_id,
                 "text": f"[{project}] {message_text}"
@@ -28,7 +28,7 @@ def send_to_telegram(project, message_text):
 
 @app.route("/")
 def home():
-    return "Nadreggator webhook online!"
+    return "Nadregator webhook online!"
 
 @app.route("/hook/<project>", methods=["POST"])
 def handle_webhook(project):
@@ -37,7 +37,6 @@ def handle_webhook(project):
         return {"error": "Invalid payload"}, 400
 
     message = data["content"]
-    print(f"[{project}] {message}")
     send_to_telegram(project, message)
     return {"status": "ok"}, 200
 
