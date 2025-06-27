@@ -12,38 +12,38 @@ logging.basicConfig(
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
 app = Flask(__name__)
 
 @app.route("/")
-def index():
-    return "Nadregator Bot is live!"
+def home():
+    return "🤖 Nadregator Bot is up!"
 
-# Command: /start
+# /start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hi, I'm alive and running!")
+    await update.message.reply_text("👋 Hello! Nadregator Bot is running.")
 
-# Telegram bot runner
+# Async bot startup
 async def run_telegram_bot():
     if not BOT_TOKEN:
-        logging.error("❌ BOT_TOKEN not set in environment variables.")
+        logging.error("❌ BOT_TOKEN is not set. Telegram bot will not start.")
         return
 
     try:
-        app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
-        app_bot.add_handler(CommandHandler("start", start))
+        application = ApplicationBuilder().token(BOT_TOKEN).build()
+        application.add_handler(CommandHandler("start", start))
 
         logging.info("✅ Telegram bot is starting...")
-        await app_bot.initialize()
-        await app_bot.start()
-        await app_bot.updater.start_polling()
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
         logging.info("✅ Bot polling started.")
-        await app_bot.updater.idle()
+        await application.updater.idle()
     except Exception as e:
-        logging.exception(f"❌ Bot failed to start: {e}")
+        logging.exception(f"❌ Failed to start bot: {e}")
 
-# Main entry point
+# Main app runner
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.create_task(run_telegram_bot())
     app.run(host="0.0.0.0", port=10000)
+
