@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: nadregatorbot
+    env: docker
+    plan: free
+    repo: https://github.com/andalfthegreat/nadregatorbot
+    branch: master
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
