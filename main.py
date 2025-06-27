@@ -1,26 +1,38 @@
+import asyncio
+from telegram.ext import ApplicationBuilder, CommandHandler
+from flask import Flask
+import threading
 import os
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from init_db import create_tables
 
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+# Telegram bot setup
+BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Hello from NadregatorBot!")
+app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-def main():
-    if not TELEGRAM_TOKEN:
-        raise ValueError("TELEGRAM_TOKEN is not set")
+# Add a test command
+async def start(update, context):
+    await update.message.reply_text("Bot is alive!")
 
-    # DB setup
-    create_tables()
+app.add_handler(CommandHandler("start", start))
 
-    # Build the application
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
+# Dummy Flask server to keep Render Web Service happy
+flask_app = Flask(__name__)
 
-    # Directly call run_polling() – it handles async internally
-    app.run_polling()
+@flask_app.route("/")
+def index():
+    return "OK", 200
+
+# Start Flask in a separate thread
+def run_flask():
+    flask_app.run(host="0.0.0.0", port=10000)
+
+# Start Telegram bot
+async def run_bot():
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    # Start Flask server (for Render port binding)
+    threading.Thread(target=run_flask).start()
+
+    # Run the bot
+    asyncio.run(run_bot())
