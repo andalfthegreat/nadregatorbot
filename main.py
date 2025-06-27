@@ -1,94 +1,63 @@
 import os
-import json
-import logging
 from flask import Flask, request
-from telegram import (
-    Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
-)
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackContext,
+    CallbackQueryHandler,
+    ContextTypes,
 )
 
-# Logging setup
-logging.basicConfig(level=logging.INFO)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# === Constants ===
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-PROJECTS = ["monad", "molandak", "chog"]
-PREFS_FILE = "user_prefs.json"
+if not BOT_TOKEN:
+    raise RuntimeError("❌ BOT_TOKEN is missing! Set it in environment variables.")
 
-# === Initialize prefs file ===
-if not os.path.exists(PREFS_FILE):
-    with open(PREFS_FILE, "w") as f:
-        json.dump({}, f)
+app = Flask(__name__)
+telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-def load_prefs():
-    with open(PREFS_FILE, "r") as f:
-        return json.load(f)
-
-def save_prefs(data):
-    with open(PREFS_FILE, "w") as f:
-        json.dump(data, f)
-
-# === Telegram Handlers ===
+# --- Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton(p.capitalize(), callback_data=f"toggle:{p}")]
-        for p in PROJECTS
+        [InlineKeyboardButton("Subscribe 🔔", callback_data="subscribe")],
+        [InlineKeyboardButton("Unsubscribe 🔕", callback_data="unsubscribe")],
     ]
-    markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Select which projects you'd like to subscribe to:", reply_markup=markup
-    )
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Welcome! Choose an option:", reply_markup=reply_markup)
 
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = str(query.from_user.id)
-    prefs = load_prefs()
-    prefs.setdefault(user_id, [])
+    action = query.data
+    await query.edit_message_text(text=f"You chose: {action}")
 
-    project = query.data.split(":")[1]
-    if project in prefs[user_id]:
-        prefs[user_id].remove(project)
-        msg = f"❌ Unsubscribed from {project}"
-    else:
-        prefs[user_id].append(project)
-        msg = f"✅ Subscribed to {project}"
-
-    save_prefs(prefs)
-    await query.edit_message_text(msg)
-
-# === Flask + Telegram Webhook ===
-flask_app = Flask(__name__)
-bot = Bot(BOT_TOKEN)
-telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-@flask_app.route(f"/{BOT_TOKEN}", methods=["POST"])
-async def webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
-    await telegram_app.process_update(update)
-    return "OK"
-
-# === Custom project message trigger ===
-@flask_app.route("/hook/<project>", methods=["POST"])
-def notify_project(project):
-    data = request.json
-    content = data.get("content", "")
-    prefs = load_prefs()
-
-    for user_id, subs in prefs.items():
-        if project in subs:
-            try:
-                bot.send_message(chat_id=int(user_id), text=f"[{project}] {content}")
-            except Exception as e:
-                logging.warning(f"Failed to send to {user_id}: {e}")
-
-    return "Message sent", 200
-
-# === Register handlers ===
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CallbackQueryHandler(handle_buttons))
 
-# === For gunicorn ===
-app = flask_app
+# --- Flask Endpoint for incoming webhook calls (e.g. announcements) ---
+@app.route("/hook/<key>", methods=["POST"])
+def webhook(key):
+    if key != "your_custom_webhook_key":
+        return "Unauthorized", 403
+    data = request.json
+    text = data.get("content")
+    if text:
+        telegram_app.create_task(broadcast_announcement(text))
+    return "OK", 200
+
+async def broadcast_announcement(message: str):
+    chat_ids = [...]  # replace this with actual user IDs from DB
+    for chat_id in chat_ids:
+        try:
+            await telegram_app.bot.send_message(chat_id=chat_id, text=message)
+        except Exception as e:
+            print(f"Failed to send to {chat_id}: {e}")
+
+# --- Start polling in a background thread ---
+import threading
+def run_telegram_bot():
+    telegram_app.run_polling()
+
+threading.Thread(target=run_telegram_bot).start()
+
