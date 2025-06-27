@@ -1,34 +1,33 @@
 import os
 import asyncio
-import threading
 from flask import Flask
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler
 
-# Load token from environment variable
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# --- Flask setup ---
 app = Flask(__name__)
 
 @app.route("/")
-def index():
-    return "NadregatorBot is running!"
+def home():
+    return "Bot is running."
 
-# --- Telegram handlers ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hello! I am NadregatorBot.")
+async def start(update, context):
+    await update.message.reply_text("Hello, I am alive!")
 
-# --- Telegram bot setup ---
 async def run_bot():
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    app_builder = ApplicationBuilder().token(BOT_TOKEN)
+    application = app_builder.build()
     application.add_handler(CommandHandler("start", start))
-    await application.run_polling()
+    await application.initialize()
+    await application.start()
+    print("Bot started.")
+    await application.updater.start_polling()
+    await application.updater.idle()
 
-# --- Run both Flask and Telegram bot ---
 if __name__ == "__main__":
-    # Start Telegram bot in a background thread to avoid event loop issues
-    threading.Thread(target=lambda: asyncio.run(run_bot()), daemon=True).start()
+    # Start the bot loop without using asyncio.run inside a thread
+    loop = asyncio.get_event_loop()
+    loop.create_task(run_bot())
 
-    # Run the Flask server
+    # Run Flask app (this blocks the main thread)
     app.run(host="0.0.0.0", port=10000)
