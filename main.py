@@ -1,7 +1,7 @@
 import os
+import threading
 import asyncio
 import psycopg2
-from psycopg2.extras import RealDictCursor
 from flask import Flask, request
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -11,91 +11,123 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# --- Config ---
+# --- Environment Setup ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL")  # Example: postgres://user:pass@host:port/dbname
 
-if not BOT_TOKEN:
-    raise RuntimeError("❌ BOT_TOKEN is missing!")
-if not DATABASE_URL:
-    raise RuntimeError("❌ DATABASE_URL is missing!")
+if not BOT_TOKEN or not DATABASE_URL:
+    raise RuntimeError("❌ BOT_TOKEN or DATABASE_URL not set in environment variables.")
 
-# --- Database ---
-conn = psycopg2.connect(DATABASE_URL, sslmode="require", cursor_factory=RealDictCursor)
-conn.autocommit = True
+# --- DB Setup ---
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL)
 
-def init_db():
-    with conn.cursor() as cur:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS projects (
-                id SERIAL PRIMARY KEY,
-                name TEXT UNIQUE NOT NULL
-            );
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS subscriptions (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT NOT NULL,
-                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE
-            );
-        """)
+def ensure_tables_exist():
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS projects (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL
+                );
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    project_id INTEGER NOT NULL REFERENCES projects(id)
+                );
+            """)
+        conn.commit()
 
-# --- Flask ---
+ensure_tables_exist()
+
+# --- Flask Setup ---
 app = Flask(__name__)
 
-# --- Telegram ---
+# --- Telegram Bot Setup ---
 telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-# --- Bot Handlers ---
+# --- Helper Functions ---
+def get_projects():
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name FROM projects ORDER BY name;")
+            return cur.fetchall()
+
+def get_user_subscriptions(user_id):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT p.name FROM subscriptions s
+                JOIN projects p ON s.project_id = p.id
+                WHERE s.user_id = %s;
+            """, (user_id,))
+            return [row[0] for row in cur.fetchall()]
+
+def toggle_subscription(user_id, project_name):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Get project ID
+            cur.execute("SELECT id FROM projects WHERE name = %s;", (project_name,))
+            result = cur.fetchone()
+            if not result:
+                return
+            project_id = result[0]
+
+            # Check if already subscribed
+            cur.execute("""
+                SELECT id FROM subscriptions WHERE user_id = %s AND project_id = %s;
+            """, (user_id, project_id))
+            exists = cur.fetchone()
+
+            if exists:
+                cur.execute("DELETE FROM subscriptions WHERE id = %s;", (exists[0],))
+                conn.commit()
+                return False
+            else:
+                cur.execute("""
+                    INSERT INTO subscriptions (user_id, project_id) VALUES (%s, %s);
+                """, (user_id, project_id))
+                conn.commit()
+                return True
+
+# --- Telegram Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    keyboard = []
+    subscriptions = get_user_subscriptions(user_id)
+    buttons = []
 
-    with conn.cursor() as cur:
-        cur.execute("SELECT * FROM projects ORDER BY name;")
-        projects = cur.fetchall()
+    for _, project_name in get_projects():
+        is_subscribed = project_name in subscriptions
+        label = f"✅ {project_name}" if is_subscribed else f"❌ {project_name}"
+        buttons.append([InlineKeyboardButton(label, callback_data=project_name)])
 
-        for project in projects:
-            cur.execute("""
-                SELECT 1 FROM subscriptions
-                WHERE user_id = %s AND project_id = %s;
-            """, (user_id, project["id"]))
-            subscribed = cur.fetchone() is not None
-
-            btn_text = f"{'✅' if subscribed else '➕'} {project['name']}"
-            action = f"{'unsub' if subscribed else 'sub'}:{project['id']}"
-            keyboard.append([InlineKeyboardButton(btn_text, callback_data=action)])
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Choose projects to subscribe/unsubscribe:", reply_markup=reply_markup)
+    reply_markup = InlineKeyboardMarkup(buttons)
+    await update.message.reply_text("Select projects to (un)subscribe:", reply_markup=reply_markup)
 
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user_id = query.from_user.id
     await query.answer()
+    user_id = query.from_user.id
+    project_name = query.data
 
-    action, project_id = query.data.split(":")
-    project_id = int(project_id)
+    subscribed = toggle_subscription(user_id, project_name)
+    status = "Subscribed ✅" if subscribed else "Unsubscribed ❌"
 
-    with conn.cursor() as cur:
-        if action == "sub":
-            cur.execute("""
-                INSERT INTO subscriptions (user_id, project_id)
-                VALUES (%s, %s)
-                ON CONFLICT DO NOTHING;
-            """, (user_id, project_id))
-        elif action == "unsub":
-            cur.execute("""
-                DELETE FROM subscriptions
-                WHERE user_id = %s AND project_id = %s;
-            """, (user_id, project_id))
+    subscriptions = get_user_subscriptions(user_id)
+    buttons = []
+    for _, name in get_projects():
+        label = f"✅ {name}" if name in subscriptions else f"❌ {name}"
+        buttons.append([InlineKeyboardButton(label, callback_data=name)])
 
-    await start(update, context)  # Refresh buttons
+    reply_markup = InlineKeyboardMarkup(buttons)
+    await query.edit_message_text(f"{status}\n\nSelect projects:", reply_markup=reply_markup)
 
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CallbackQueryHandler(handle_buttons))
 
-# --- Webhook endpoint for announcements ---
+# --- Webhook for Announcements ---
 @app.route("/hook/<key>", methods=["POST"])
 def webhook(key):
     if key != "your_custom_webhook_key":
@@ -106,36 +138,32 @@ def webhook(key):
         telegram_app.create_task(broadcast_announcement(text))
     return "OK", 200
 
-# --- Broadcast to all subscribed users ---
 async def broadcast_announcement(message: str):
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT DISTINCT user_id FROM subscriptions;
-        """)
-        user_ids = [row["user_id"] for row in cur.fetchall()]
-
-    for user_id in user_ids:
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT user_id FROM subscriptions;")
+            chat_ids = [row[0] for row in cur.fetchall()]
+    for chat_id in chat_ids:
         try:
-            await telegram_app.bot.send_message(chat_id=user_id, text=message)
+            await telegram_app.bot.send_message(chat_id=chat_id, text=message)
         except Exception as e:
-            print(f"Failed to send to {user_id}: {e}")
+            print(f"❌ Failed to send to {chat_id}: {e}")
 
-# --- Run bot and init ---
+# --- Bot Runner ---
+async def run_bot():
+    await telegram_app.initialize()
+    await telegram_app.start()
+    print("✅ Bot is running...")
+    await telegram_app.run_polling()
+
 def start_bot():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(run_bot())
 
-async def run_bot():
-    await telegram_app.initialize()
-    await telegram_app.start()
-    print("✅ Bot is running...")
-    await telegram_app.updater.start_polling()
-    await telegram_app.updater.idle()
+threading.Thread(target=start_bot).start()
 
-if __name__ == "__main__":
-    init_db()
-    import threading
-    threading.Thread(target=start_bot).start()
-    app.run(host="0.0.0.0", port=10000)
-
+# --- Flask Entry Point ---
+@app.route("/")
+def index():
+    return "Bot is running", 200
