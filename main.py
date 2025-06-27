@@ -1,50 +1,39 @@
 import os
-import logging
+import threading
 import asyncio
+
 from flask import Flask
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    ContextTypes
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
-
-# Load token from environment
+# Get the token from environment variable
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN environment variable not set")
 
-# Flask app for Render
+# Flask app
 app = Flask(__name__)
 
 @app.route("/")
-def index():
-    return "🤖 Nadregator Bot is running!", 200
+def home():
+    return "🤖 Nadregator Bot is up!"
 
-# Telegram handler
+# Telegram command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hello! I'm Nadregator!")
+    await update.message.reply_text("Hello! I'm alive.")
 
-# Run the bot (in thread-safe asyncio way)
+# Async bot runner
+async def _run_bot():
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    await application.run_polling()
+
+# Start the bot in a background thread
 def run_bot():
-    asyncio.run(_run_bot_async())
+    asyncio.run(_run_bot())
 
-async def _run_bot_async():
-    app_ = ApplicationBuilder().token(BOT_TOKEN).build()
-    app_.add_handler(CommandHandler("start", start))
-    await app_.initialize()
-    await app_.start()
-    await app_.updater.start_polling()
-    await app_.updater.idle()
+threading.Thread(target=run_bot).start()
 
+# Run Flask (Render will start this as the main process)
 if __name__ == "__main__":
-    import threading
-    threading.Thread(target=run_bot).start()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    app.run(host="0.0.0.0", port=10000)
+
 
