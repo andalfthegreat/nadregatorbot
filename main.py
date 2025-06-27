@@ -5,7 +5,7 @@ import requests
 
 app = Flask(__name__)
 
-TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+TELEGRAM_BOT_TOKEN = "7970077331:AAEE-_YknFwcxhl3rdGgRbcOxR3iTXW7RDE"
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 ALLOWED_PROJECTS = ["monad", "molandak", "chog"]
