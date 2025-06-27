@@ -1,109 +1,113 @@
-from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
-import json
 import os
+import json
+from flask import Flask, request
+from telegram import (
+    Bot,
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    CallbackQueryHandler,
+)
+import logging
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
-if not BOT_TOKEN:
-    raise RuntimeError("❌ BOT_TOKEN is missing! Make sure it's set in Render environment variables.")
+# Telegram Bot Token from Render environment variables
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# Load user subscriptions from JSON file
-try:
-    with open("user_prefs.json", "r") as f:
-        user_prefs = json.load(f)
-except FileNotFoundError:
-    user_prefs = {}
+# Define list of projects
+PROJECTS = ["monad", "molandak", "chog"]
 
-projects = ["monad", "molandak"]
+# Store user subscriptions
+USER_PREFS_FILE = "user_prefs.json"
+if not os.path.exists(USER_PREFS_FILE):
+    with open(USER_PREFS_FILE, "w") as f:
+        json.dump({}, f)
 
-app = Flask(__name__)
+# Telegram app
+telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
+bot = Bot(BOT_TOKEN)
 
+# Load user preferences
+def load_user_prefs():
+    with open(USER_PREFS_FILE, "r") as f:
+        return json.load(f)
 
-# --- Telegram Command Handlers ---
+def save_user_prefs(prefs):
+    with open(USER_PREFS_FILE, "w") as f:
+        json.dump(prefs, f)
 
+# Start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    user_prefs.setdefault(user_id, [])
-    await update.message.reply_text("Welcome to Nadregator! Use /projects to manage your subscriptions.")
-
-
-async def projects_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    user_projects = set(user_prefs.get(user_id, []))
-
-    keyboard = []
-    for project in projects:
-        if project in user_projects:
-            label = f"✅ {project}"
-        else:
-            label = f"➕ {project}"
-        keyboard.append([InlineKeyboardButton(label, callback_data=project)])
-
+    keyboard = [
+        [InlineKeyboardButton(project.capitalize(), callback_data=f"toggle:{project}")]
+        for project in PROJECTS
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Select a project to subscribe/unsubscribe:", reply_markup=reply_markup)
+    await update.message.reply_text("Select projects to subscribe/unsubscribe:", reply_markup=reply_markup)
 
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Button handler
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
-    project = query.data
+    data = query.data
 
-    if user_id not in user_prefs:
-        user_prefs[user_id] = []
+    if data.startswith("toggle:"):
+        project = data.split(":")[1]
+        prefs = load_user_prefs()
+        prefs.setdefault(user_id, [])
+        if project in prefs[user_id]:
+            prefs[user_id].remove(project)
+            status = f"❌ Unsubscribed from {project.capitalize()}"
+        else:
+            prefs[user_id].append(project)
+            status = f"✅ Subscribed to {project.capitalize()}"
+        save_user_prefs(prefs)
+        await query.edit_message_text(text=status)
 
-    if project in user_prefs[user_id]:
-        user_prefs[user_id].remove(project)
-        await query.edit_message_text(f"❌ Unsubscribed from {project}")
-    else:
-        user_prefs[user_id].append(project)
-        await query.edit_message_text(f"✅ Subscribed to {project}")
+# Webhook broadcaster
+app = Flask(__name__)
 
-    with open("user_prefs.json", "w") as f:
-        json.dump(user_prefs, f)
+@app.before_request
+def setup_webhook_once():
+    if not hasattr(app, "initialized"):
+        app.initialized = True
+        # Set the Telegram webhook
+        webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}"
+        telegram_app.bot.set_webhook(url=webhook_url)
+        logging.info(f"Webhook set to {webhook_url}")
 
+@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+async def telegram_webhook():
+    data = request.get_json(force=True)
+    update = Update.de_json(data, bot)
+    await telegram_app.process_update(update)
+    return "OK"
 
-# --- Discord Webhook Handler ---
+# Webhook for external posts (e.g., from curl/Discord)
 @app.route("/hook/<project>", methods=["POST"])
-def handle_webhook(project):
-    if project not in projects:
-        return {"error": "Unknown project"}, 400
-
-    data = request.get_json()
-    content = data.get("content", "")
-
-    for user_id, prefs in user_prefs.items():
-        if project in prefs:
+def external_webhook(project):
+    message = request.json.get("content")
+    prefs = load_user_prefs()
+    for user_id, subscribed in prefs.items():
+        if project in subscribed:
             try:
-                app.bot.send_message(chat_id=user_id, text=f"[{project}] {content}")
+                bot.send_message(chat_id=int(user_id), text=f"[{project}] {message}")
             except Exception as e:
-                print(f"Failed to send to {user_id}: {e}")
+                logging.error(f"Failed to send to {user_id}: {e}")
+    return "OK"
 
-    return {"ok": True}
+# Register handlers
+telegram_app.add_handler(CommandHandler("start", start))
+telegram_app.add_handler(CallbackQueryHandler(button))
 
-
-# --- Start Bot via Webhook ---
-@app.before_first_request
-def activate_bot():
-    from telegram import Bot
-    from telegram.ext import Application
-
-    print("🔄 Initializing Telegram bot...")
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("projects", projects_command))
-    application.add_handler(CallbackQueryHandler(button_handler))
-
-    app.bot = application.bot
-    application.run_polling()  # NOTE: Replace with `run_webhook()` for production if needed
-
-
-# --- Required for Render/Gunicorn ---
+# Export app for gunicorn
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
-
-    threading.Thread(target=lambda: telegram_app.run_polling(), daemon=True).start()
-    app.run(host="0.0.0.0", port=10000)
+    app.run()
