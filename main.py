@@ -1,113 +1,94 @@
 import os
 import json
+import logging
 from flask import Flask, request
 from telegram import (
-    Bot,
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
+    Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 )
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    ContextTypes,
-    CallbackQueryHandler,
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 )
-import logging
 
-# Configure logging
+# Logging setup
 logging.basicConfig(level=logging.INFO)
 
-# Telegram Bot Token from Render environment variables
+# === Constants ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-
-# Define list of projects
 PROJECTS = ["monad", "molandak", "chog"]
+PREFS_FILE = "user_prefs.json"
 
-# Store user subscriptions
-USER_PREFS_FILE = "user_prefs.json"
-if not os.path.exists(USER_PREFS_FILE):
-    with open(USER_PREFS_FILE, "w") as f:
+# === Initialize prefs file ===
+if not os.path.exists(PREFS_FILE):
+    with open(PREFS_FILE, "w") as f:
         json.dump({}, f)
 
-# Telegram app
-telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
-bot = Bot(BOT_TOKEN)
-
-# Load user preferences
-def load_user_prefs():
-    with open(USER_PREFS_FILE, "r") as f:
+def load_prefs():
+    with open(PREFS_FILE, "r") as f:
         return json.load(f)
 
-def save_user_prefs(prefs):
-    with open(USER_PREFS_FILE, "w") as f:
-        json.dump(prefs, f)
+def save_prefs(data):
+    with open(PREFS_FILE, "w") as f:
+        json.dump(data, f)
 
-# Start command handler
+# === Telegram Handlers ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton(project.capitalize(), callback_data=f"toggle:{project}")]
-        for project in PROJECTS
+        [InlineKeyboardButton(p.capitalize(), callback_data=f"toggle:{p}")]
+        for p in PROJECTS
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Select projects to subscribe/unsubscribe:", reply_markup=reply_markup)
+    markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "Select which projects you'd like to subscribe to:", reply_markup=markup
+    )
 
-# Button handler
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
-    data = query.data
+    prefs = load_prefs()
+    prefs.setdefault(user_id, [])
 
-    if data.startswith("toggle:"):
-        project = data.split(":")[1]
-        prefs = load_user_prefs()
-        prefs.setdefault(user_id, [])
-        if project in prefs[user_id]:
-            prefs[user_id].remove(project)
-            status = f"❌ Unsubscribed from {project.capitalize()}"
-        else:
-            prefs[user_id].append(project)
-            status = f"✅ Subscribed to {project.capitalize()}"
-        save_user_prefs(prefs)
-        await query.edit_message_text(text=status)
+    project = query.data.split(":")[1]
+    if project in prefs[user_id]:
+        prefs[user_id].remove(project)
+        msg = f"❌ Unsubscribed from {project}"
+    else:
+        prefs[user_id].append(project)
+        msg = f"✅ Subscribed to {project}"
 
-# Webhook broadcaster
-app = Flask(__name__)
+    save_prefs(prefs)
+    await query.edit_message_text(msg)
 
-@app.before_request
-def setup_webhook_once():
-    if not hasattr(app, "initialized"):
-        app.initialized = True
-        # Set the Telegram webhook
-        webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}"
-        telegram_app.bot.set_webhook(url=webhook_url)
-        logging.info(f"Webhook set to {webhook_url}")
+# === Flask + Telegram Webhook ===
+flask_app = Flask(__name__)
+bot = Bot(BOT_TOKEN)
+telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
-async def telegram_webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, bot)
+@flask_app.route(f"/{BOT_TOKEN}", methods=["POST"])
+async def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
     await telegram_app.process_update(update)
     return "OK"
 
-# Webhook for external posts (e.g., from curl/Discord)
-@app.route("/hook/<project>", methods=["POST"])
-def external_webhook(project):
-    message = request.json.get("content")
-    prefs = load_user_prefs()
-    for user_id, subscribed in prefs.items():
-        if project in subscribed:
+# === Custom project message trigger ===
+@flask_app.route("/hook/<project>", methods=["POST"])
+def notify_project(project):
+    data = request.json
+    content = data.get("content", "")
+    prefs = load_prefs()
+
+    for user_id, subs in prefs.items():
+        if project in subs:
             try:
-                bot.send_message(chat_id=int(user_id), text=f"[{project}] {message}")
+                bot.send_message(chat_id=int(user_id), text=f"[{project}] {content}")
             except Exception as e:
-                logging.error(f"Failed to send to {user_id}: {e}")
-    return "OK"
+                logging.warning(f"Failed to send to {user_id}: {e}")
 
-# Register handlers
+    return "Message sent", 200
+
+# === Register handlers ===
 telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(CallbackQueryHandler(button))
+telegram_app.add_handler(CallbackQueryHandler(handle_buttons))
 
-# Export app for gunicorn
-if __name__ == "__main__":
-    app.run()
+# === For gunicorn ===
+app = flask_app
