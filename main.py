@@ -1,6 +1,5 @@
 import os
 import asyncio
-import threading
 from flask import Flask, request
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -11,17 +10,16 @@ from telegram.ext import (
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
 if not BOT_TOKEN:
     raise RuntimeError("❌ BOT_TOKEN is missing! Set it in environment variables.")
-
-# --- Flask app ---
-app = Flask(__name__)
 
 # --- Telegram bot setup ---
 telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-# --- Telegram handlers ---
+# --- Flask app ---
+app = Flask(__name__)
+
+# --- Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("Subscribe 🔔", callback_data="subscribe")],
@@ -39,7 +37,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CallbackQueryHandler(handle_buttons))
 
-# --- Endpoint for external announcements ---
+# --- Webhook endpoint (optional external trigger) ---
 @app.route("/hook/<key>", methods=["POST"])
 def webhook(key):
     if key != "your_custom_webhook_key":
@@ -50,28 +48,29 @@ def webhook(key):
         telegram_app.create_task(broadcast_announcement(text))
     return "OK", 200
 
-# --- Broadcast to all chat_ids (replace with your logic) ---
+# --- Replace this with your actual subscriber IDs ---
 async def broadcast_announcement(message: str):
-    chat_ids = [...]  # Replace with actual chat IDs
+    chat_ids = [...]  # Replace this with real chat IDs
     for chat_id in chat_ids:
         try:
             await telegram_app.bot.send_message(chat_id=chat_id, text=message)
         except Exception as e:
             print(f"❌ Failed to send to {chat_id}: {e}")
 
-# --- Run bot and Flask ---
+# --- Background bot runner ---
 async def run_bot():
     await telegram_app.initialize()
     await telegram_app.start()
+    print("✅ Bot started and listening...")
     await telegram_app.updater.start_polling()
-    await telegram_app.updater.idle()
+    # ❌ REMOVE `idle()`! Not needed in PTB 20+
+    # await telegram_app.updater.idle()
 
-if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
+def start_bot():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(run_bot())
 
-    def start_bot():
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(run_bot())
-
-    threading.Thread(target=start_bot).start()
-    app.run(host="0.0.0.0", port=10000)
+# --- Start bot in background ---
+import threading
+threading.Thread(target=start_bot).start()
