@@ -1,34 +1,49 @@
 import os
 import asyncio
+import logging
 from flask import Flask
-from telegram.ext import ApplicationBuilder, CommandHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from telegram import Update
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+# Setup logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 app = Flask(__name__)
 
 @app.route("/")
-def home():
-    return "Hello from Nadregator Bot!"
+def index():
+    return "Nadregator Bot is live!"
 
-# Telegram command handler
-async def start(update: Update, context):
-    await update.message.reply_text("Hi! Nadregator is alive!")
+# Command: /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Hi, I'm alive and running!")
 
-# Background bot loop
-async def run_bot():
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
+# Telegram bot runner
+async def run_telegram_bot():
+    if not BOT_TOKEN:
+        logging.error("❌ BOT_TOKEN not set in environment variables.")
+        return
 
-    print("Starting Telegram bot polling...")
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()
-    await application.updater.idle()
+    try:
+        app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
+        app_bot.add_handler(CommandHandler("start", start))
 
-# Entrypoint
+        logging.info("✅ Telegram bot is starting...")
+        await app_bot.initialize()
+        await app_bot.start()
+        await app_bot.updater.start_polling()
+        logging.info("✅ Bot polling started.")
+        await app_bot.updater.idle()
+    except Exception as e:
+        logging.exception(f"❌ Bot failed to start: {e}")
+
+# Main entry point
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    loop.create_task(run_bot())  # Run the bot in the background
-    app.run(host="0.0.0.0", port=10000)  # Start Flask (blocks main thread)
+    loop.create_task(run_telegram_bot())
+    app.run(host="0.0.0.0", port=10000)
