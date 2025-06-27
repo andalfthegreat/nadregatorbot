@@ -1,35 +1,23 @@
 import os
-import psycopg2
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import inspect
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+Base = declarative_base()
 
-if not DATABASE_URL:
-    raise RuntimeError("❌ DATABASE_URL not set!")
+# Define your model(s)
+class User(Base):
+    __tablename__ = 'users'
 
-def init_db():
-    conn = psycopg2.connect(DATABASE_URL)
-    cur = conn.cursor()
+    id = Column(Integer, primary_key=True)
+    telegram_id = Column(Integer, unique=True)
+    name = Column(String)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS projects (
-            id SERIAL PRIMARY KEY,
-            name TEXT UNIQUE NOT NULL
-        );
-    """)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS subscriptions (
-            id SERIAL PRIMARY KEY,
-            user_id BIGINT NOT NULL,
-            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-            UNIQUE(user_id, project_id)
-        );
-    """)
+def create_tables():
+    database_url = os.environ.get("DATABASE_URL")
+    engine = create_engine(database_url)
+    inspector = inspect(engine)
 
-    conn.commit()
-    cur.close()
-    conn.close()
-    print("✅ Tables created.")
-
-if __name__ == "__main__":
-    init_db()
+    if not inspector.has_table("users"):
+        Base.metadata.create_all(engine)
