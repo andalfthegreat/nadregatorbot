@@ -1,38 +1,34 @@
-import asyncio
-from telegram.ext import ApplicationBuilder, CommandHandler
-from flask import Flask
-import threading
 import os
+import asyncio
+import threading
+from flask import Flask
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Telegram bot setup
-BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
+# Load token from environment variable
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-app = ApplicationBuilder().token(BOT_TOKEN).build()
+# --- Flask setup ---
+app = Flask(__name__)
 
-# Add a test command
-async def start(update, context):
-    await update.message.reply_text("Bot is alive!")
-
-app.add_handler(CommandHandler("start", start))
-
-# Dummy Flask server to keep Render Web Service happy
-flask_app = Flask(__name__)
-
-@flask_app.route("/")
+@app.route("/")
 def index():
-    return "OK", 200
+    return "NadregatorBot is running!"
 
-# Start Flask in a separate thread
-def run_flask():
-    flask_app.run(host="0.0.0.0", port=10000)
+# --- Telegram handlers ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Hello! I am NadregatorBot.")
 
-# Start Telegram bot
+# --- Telegram bot setup ---
 async def run_bot():
-    await app.run_polling()
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    await application.run_polling()
 
+# --- Run both Flask and Telegram bot ---
 if __name__ == "__main__":
-    # Start Flask server (for Render port binding)
-    threading.Thread(target=run_flask).start()
+    # Start Telegram bot in a background thread to avoid event loop issues
+    threading.Thread(target=lambda: asyncio.run(run_bot()), daemon=True).start()
 
-    # Run the bot
-    asyncio.run(run_bot())
+    # Run the Flask server
+    app.run(host="0.0.0.0", port=10000)
