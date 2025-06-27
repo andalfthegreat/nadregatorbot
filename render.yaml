@@ -1,10 +1,15 @@
 services:
-  - type: web
-    name: nadregatorbot
+  - type: worker
+    name: telegram-bot
     env: docker
     plan: free
-    repo: https://github.com/andalfthegreat/nadregatorbot
-    branch: master
+    dockerContext: .
+    dockerfilePath: ./Dockerfile
     envVars:
-      - key: BOT_TOKEN
+      - key: TELEGRAM_TOKEN
         sync: false
+      - key: DATABASE_URL
+        sync: false
+
+databases:
+  - name: telegram-db
