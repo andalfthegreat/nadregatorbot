@@ -1,33 +1,35 @@
 import os
 import asyncio
 from flask import Flask
-from telegram.ext import ApplicationBuilder, CommandHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram import Update
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 app = Flask(__name__)
 
 @app.route("/")
-def home():
-    return "Bot is running."
+def index():
+    return "Bot is alive."
 
-async def start(update, context):
-    await update.message.reply_text("Hello, I am alive!")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Hello! I'm alive.")
 
 async def run_bot():
     app_builder = ApplicationBuilder().token(BOT_TOKEN)
     application = app_builder.build()
+
     application.add_handler(CommandHandler("start", start))
+
     await application.initialize()
     await application.start()
-    print("Bot started.")
+    print("Telegram bot started!")
     await application.updater.start_polling()
     await application.updater.idle()
 
 if __name__ == "__main__":
-    # Start the bot loop without using asyncio.run inside a thread
     loop = asyncio.get_event_loop()
     loop.create_task(run_bot())
 
-    # Run Flask app (this blocks the main thread)
+    # Flask blocks the main thread, but bot still runs in the loop
     app.run(host="0.0.0.0", port=10000)
