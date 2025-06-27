@@ -5,11 +5,12 @@ import requests
 
 app = Flask(__name__)
 
-TELEGRAM_BOT_TOKEN = os.environ.get("7970077331:AAEE-_YknFwcxhl3rdGgRbcOxR3iTXW7RDE")
+# Hardcoded token for webhook route
+TELEGRAM_BOT_TOKEN = "7970077331:AAEE-_YknFwcxhl3rdGgRbcOxR3iTXW7RDE"
 USER_PREFS_FILE = 'user_prefs.json'
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
-# ✅ Only these projects are allowed
+# List of allowed projects
 ALLOWED_PROJECTS = ["monad", "molandak", "chog"]
 
 def load_prefs():
@@ -49,11 +50,11 @@ def handle_webhook(project):
     send_to_telegram(project, message)
     return {"status": "ok"}, 200
 
-@app.route(f"/{TELEGRAM_BOT_TOKEN}", methods=["POST"])
+# ✅ Hardcoded route so Telegram webhook works
+@app.route("/7970077331:AAEE-_YknFwcxhl3rdGgRbcOxR3iTXW7RDE", methods=["POST"])
 def telegram_webhook():
     data = request.json
 
-    # ✅ Handle text messages
     if "message" in data:
         message = data["message"]
         user_id = str(message["chat"]["id"])
@@ -117,7 +118,6 @@ def telegram_webhook():
             )
         return {"ok": True}
 
-    # ✅ Handle inline button callbacks
     elif "callback_query" in data:
         query = data["callback_query"]
         user_id = str(query["from"]["id"])
@@ -145,7 +145,7 @@ def telegram_webhook():
                     else:
                         send_reply(user_id, f"⚠️ Not subscribed to '{project}'")
 
-        # Acknowledge callback so Telegram stops loading spinner
+        # Acknowledge callback
         callback_id = query["id"]
         requests.post(f"{TELEGRAM_API}/answerCallbackQuery", json={"callback_query_id": callback_id})
 
@@ -167,4 +167,3 @@ def send_buttons(chat_id, text, buttons):
         }
     }
     requests.post(url, json=payload)
-
