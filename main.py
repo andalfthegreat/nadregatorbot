@@ -1,39 +1,38 @@
 import os
-import threading
-import asyncio
-
-from flask import Flask
+from flask import Flask, request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import Dispatcher, MessageHandler, filters
 
-# Get the token from environment variable
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+APP_URL = os.environ.get("APP_URL")  # e.g. https://your-app.onrender.com
 
-# Flask app
 app = Flask(__name__)
+application = ApplicationBuilder().token(BOT_TOKEN).build()
+
+# Simple handler
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Hello! I'm alive with webhook!")
+
+application.add_handler(CommandHandler("start", start))
 
 @app.route("/")
 def home():
     return "🤖 Nadregator Bot is up!"
 
-# Telegram command handler
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hello! I'm alive.")
+# This route handles incoming Telegram updates
+@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+async def webhook():
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    await application.process_update(update)
+    return "ok"
 
-# Async bot runner
-async def _run_bot():
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    await application.run_polling()
-
-# Start the bot in a background thread
-def run_bot():
-    asyncio.run(_run_bot())
-
-threading.Thread(target=run_bot).start()
-
-# Run Flask (Render will start this as the main process)
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    # Set the webhook when starting the app
+    import asyncio
+    async def set_webhook():
+        await application.bot.set_webhook(f"{APP_URL}/{BOT_TOKEN}")
 
+    asyncio.run(set_webhook())
+    app.run(host="0.0.0.0", port=10000)
 
