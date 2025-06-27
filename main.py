@@ -1,42 +1,52 @@
-import os
 import asyncio
+import threading
 from flask import Flask
-from telegram.ext import ApplicationBuilder, CommandHandler
+from telegram import Update
+from telegram.ext import (
+    ApplicationBuilder,
+    ContextTypes,
+    CommandHandler,
+)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# Replace this with your actual bot token
+BOT_TOKEN = "YOUR_BOT_TOKEN"
 
 app = Flask(__name__)
 
 @app.route("/")
 def index():
-    return "🤖 Nadregator Bot is alive!"
+    return "🤖 NadRegatorBot is running."
 
+# Basic /start command handler
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Hello! I'm alive.")
+
+# Run Telegram bot logic
 async def start_bot():
-    print("🚀 Bot initializing...")
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    try:
+        print("🚀 Bot initializing...")
+        application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    async def start(update, context):
-        await update.message.reply_text("Hi! I am alive.")
+        # Add command handlers
+        application.add_handler(CommandHandler("start", start))
 
-    application.add_handler(CommandHandler("start", start))
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
 
-    print("✅ Starting bot polling...")
-    await application.run_polling()
+        print("✅ Bot polling started.")
+    except Exception as e:
+        print(f"❌ Bot failed to start: {e}")
 
-def main():
-    loop = asyncio.get_event_loop()
-
-    # Schedule the bot
-    loop.create_task(start_bot())
-
-    # Run the Flask app in the same event loop
-    from hypercorn.asyncio import serve
-    from hypercorn.config import Config
-
-    config = Config()
-    config.bind = ["0.0.0.0:10000"]
-    loop.run_until_complete(serve(app, config))
+# Run bot in its own thread to avoid event loop conflicts
+def run_bot():
+    asyncio.run(start_bot())
 
 if __name__ == "__main__":
-    main()
+    print("🔧 main.py is running")
+    bot_thread = threading.Thread(target=run_bot)
+    bot_thread.start()
+
+    # Run Flask app (should be served by Hypercorn, not directly in prod)
+    app.run(host="0.0.0.0", port=10000)
 
