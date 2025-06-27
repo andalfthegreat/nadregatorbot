@@ -13,13 +13,13 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("❌ BOT_TOKEN is missing! Set it in environment variables.")
 
-# --- Telegram bot setup ---
-telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-# --- Flask app ---
+# Flask app
 app = Flask(__name__)
 
-# --- Handlers ---
+# Telegram app
+telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+# Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("Subscribe 🔔", callback_data="subscribe")],
@@ -37,7 +37,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CallbackQueryHandler(handle_buttons))
 
-# --- Webhook endpoint (optional external trigger) ---
 @app.route("/hook/<key>", methods=["POST"])
 def webhook(key):
     if key != "your_custom_webhook_key":
@@ -48,29 +47,31 @@ def webhook(key):
         telegram_app.create_task(broadcast_announcement(text))
     return "OK", 200
 
-# --- Replace this with your actual subscriber IDs ---
 async def broadcast_announcement(message: str):
-    chat_ids = [...]  # Replace this with real chat IDs
+    chat_ids = [...]  # Replace with actual chat IDs
     for chat_id in chat_ids:
         try:
             await telegram_app.bot.send_message(chat_id=chat_id, text=message)
         except Exception as e:
             print(f"❌ Failed to send to {chat_id}: {e}")
 
-# --- Background bot runner ---
-async def run_bot():
+# Run both Flask and Telegram in the same loop
+async def main():
     await telegram_app.initialize()
     await telegram_app.start()
-    print("✅ Bot started and listening...")
-    await telegram_app.updater.start_polling()
-    # ❌ REMOVE `idle()`! Not needed in PTB 20+
-    # await telegram_app.updater.idle()
+    print("✅ Telegram bot started")
 
-def start_bot():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(run_bot())
+    from hypercorn.asyncio import serve
+    from hypercorn.config import Config
 
-# --- Start bot in background ---
-import threading
-threading.Thread(target=start_bot).start()
+    config = Config()
+    config.bind = ["0.0.0.0:10000"]  # Make sure to expose port 10000 in Dockerfile
+    print("🚀 Flask app serving...")
+
+    await asyncio.gather(
+        serve(app, config),
+        telegram_app.updater.start_polling(),
+    )
+
+if __name__ == "__main__":
+    asyncio.run(main())
